@@ -1,7 +1,11 @@
 import pandas as pd
+import numpy as np
 import os
+import lightgbm as lgb
 
 data_path = "../data/"
+
+
 # boundaries_sub_data_path = "other/boundaries"
 # bayesian_run_path = "../data/bayesian_runs/"
 
@@ -25,22 +29,63 @@ def write_df(df, file_name, subfolder):
     path = os.path.join(data_path, subfolder)
     df.to_csv(os.path.join(path, file_name), index=False)
 
-    
+
+def smape(pred, eval_data):
+    if hasattr(eval_data, "label"):
+        A = eval_data.label  # Used by lightgbm
+    else:
+        A = eval_data  # Used by numpy
+    F = pred
+
+    if type(pred) == int or type(pred) == float:
+        # Single cases
+        value = 100 / 1 * np.sum(2 * np.abs(F - A) / (np.abs(A) + np.abs(F)))
+    else:
+        # Many cases
+        value = 100 / len(A) * np.sum(2 * np.abs(F - A) / (np.abs(A) + np.abs(F)))
+    return "smape", value, False
+
+
+def build_callbacks(
+    early_stopping: int = 0, log_evaluation: int = 0, record_evaluation: dict = None
+):
+    callbacks = []
+
+    # Stop earlier if no changes
+    if early_stopping:
+        callbacks.append(
+            lgb.early_stopping(early_stopping, first_metric_only=True, verbose=False)
+        )
+
+    # Log every X-th line
+    if log_evaluation:
+        callbacks.append(lgb.log_evaluation(log_evaluation))
+
+    if record_evaluation is not None:
+        assert (
+            type(record_evaluation) == dict
+        ), "´record_evaluation´ has to be dictionary"
+        callbacks.append(lgb.record_evaluation(record_evaluation))
+
+    return callbacks
+
+
 def _fix_df_train_issues(df):
     rr = df[
         (df["state_abb"] == "NM")
         & (df["county"].str.contains("ana county", case=False))
-    ]
+        ]
     rr = rr["county"].value_counts()
     assert rr.shape[0] == 1, "should only have one county here"
     df["county"] = df["county"].str.replace(rr.index[0], "Dona Ana County")
 
     return df
 
+
 def _fix_df_train(df_train):
     df = df_train.copy()
     df_census = read_df("census_starter.csv")
-    
+
     # Add year
     df["first_day_of_month"] = pd.to_datetime(df["first_day_of_month"])
     df["year"] = df["first_day_of_month"].dt.year.astype(int)
@@ -48,7 +93,7 @@ def _fix_df_train(df_train):
     # Add df_census to df
     cols = list(df_census.columns)
     cols.remove("cfips")
-    
+
     t0 = df_census.melt("cfips", cols)
     t0["year"] = t0["variable"].str.split("_").str[-1].astype(int)
     t0["variable_name"] = t0["variable"].str.rsplit("_", expand=False, n=1).str[0]
@@ -64,7 +109,23 @@ def _fix_df_train(df_train):
     df["month"] = df["first_day_of_month"].dt.month
 
     return df
-    
+
+
+def _loop_new_cols(
+        df: pd.DataFrame,
+        df_mapped_feature: pd.DataFrame,
+        f: callable,
+        target_col: str,
+        groupby_col: str = None,
+) -> pd.DataFrame:
+    res = []
+    for idx, row in df_mapped_feature.iterrows():
+        r = f(df, idx, target_col, int(row["params"]), groupby_col)
+        res.append(r)
+
+    return pd.concat(res, axis=1)
+
+
 states_abb = {
     "AK": "Alaska",
     "AL": "Alabama",
