@@ -31,9 +31,9 @@ class ManageFeatures(HasTraits):
 
         model_params["num_iterations"] = round(model_params["num_iterations"])
         model_params["num_leaves"] = round(model_params["num_leaves"])
-        model_params['bagging_freq'] = int(np.round(model_params['bagging_freq']))
-        model_params['max_depth'] = int(np.round(model_params['max_depth']))
-        model_params['min_data_in_leaf'] = int(np.round(model_params['min_data_in_leaf']))
+        model_params['bagging_freq'] = round(np.round(model_params['bagging_freq']))
+        model_params['max_depth'] = round(np.round(model_params['max_depth']))
+        model_params['min_data_in_leaf'] = round(np.round(model_params['min_data_in_leaf']))
 
         for key, _tuple in self._model_pbounds.items():
             if model_params[key] < _tuple[0]:
@@ -75,6 +75,7 @@ class ManageFeatures(HasTraits):
 
         return df_features
 
+
     def generate_target(self, df_train: pd.DataFrame, shift=0):
         t0 = (
             df_train.sort_values(["cfips", "first_day_of_month"])
@@ -85,6 +86,7 @@ class ManageFeatures(HasTraits):
         t0.index = df_train["row_id"]
 
         return t0
+
 
     def get_params(self, bay_params: dict):
         # Mapping for columns

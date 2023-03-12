@@ -1,7 +1,8 @@
-import pandas as pd
-import numpy as np
 import os
+
 import lightgbm as lgb
+import numpy as np
+import pandas as pd
 
 data_path = "../data/"
 
@@ -9,9 +10,30 @@ data_path = "../data/"
 # boundaries_sub_data_path = "other/boundaries"
 # bayesian_run_path = "../data/bayesian_runs/"
 
+def read_test(df_train, df_census_population):
+    df_test = read_df("test.csv")
+    t1 = df_train[["cfips", "state", "state_abb", "county"]].value_counts().reset_index().drop(columns=[0])
+    df_test = pd.merge(
+        df_test, t1, "left", "cfips"
+    )
+    df_test = _fix_df_train(df_test)
+
+    # Remove dates already published by Kaggle
+    df_test = df_test[~(df_test['first_day_of_month'].isin(['2022-11-01', '2022-12-01']))]
+
+    # Join population data
+    df_test = pd.merge(df_test, df_census_population, 'left', ['year', 'county', 'state', 'state_abb'])
+
+    df_test = df_test.rename(columns={'census_over_18_population_x1000': 'target_census_over_18_population_x1000',
+                                      'census_population_x1000': 'target_census_population_x1000'})
+
+    return df_test
+
+
 def read_df(filename, sub_folder="kaggle", delimiter=",", skiprows=0):
     df = pd.read_csv(os.path.join(data_path, sub_folder, filename), delimiter=delimiter, skiprows=skiprows)
 
+    # if filename == "train.csv" or filename == 'test.csv':
     if filename == "train.csv":
         df_revealed_test = read_df("revealed_test.csv")
         df = (
@@ -47,7 +69,7 @@ def smape(pred, eval_data):
 
 
 def build_callbacks(
-    early_stopping: int = 0, log_evaluation: int = 0, record_evaluation: dict = None
+        early_stopping: int = 0, log_evaluation: int = 0, record_evaluation: dict = None
 ):
     callbacks = []
 
@@ -63,11 +85,24 @@ def build_callbacks(
 
     if record_evaluation is not None:
         assert (
-            type(record_evaluation) == dict
+                type(record_evaluation) == dict
         ), "´record_evaluation´ has to be dictionary"
         callbacks.append(lgb.record_evaluation(record_evaluation))
 
     return callbacks
+
+
+def ztransform2(Y, param):
+    return (np.sqrt(Y) - np.sqrt(param)) / np.sqrt(Y + param)
+
+
+def inverseZ2(Z, param, epsilon=1e-6):
+    Z2 = np.minimum(Z, 1 - epsilon)
+    Z2 = np.maximum(Z2, -1 + epsilon)
+    result = -1 - Z2 * np.sqrt(2 - Z2 ** 2)
+    result = result / (Z2 ** 2 - 1)
+    result = param * result ** 2
+    return result
 
 
 def _fix_df_train_issues(df):
@@ -80,6 +115,24 @@ def _fix_df_train_issues(df):
     df["county"] = df["county"].str.replace(rr.index[0], "Dona Ana County")
 
     return df
+
+
+def _add_location(df_train):
+    df_location = read_df('cfips_location.csv', 'usa-counties-coordinates')
+
+    def rot(df):
+        for angle in [15, 30, 45]:
+            df[f'rot_{angle}_x'] = (np.cos(np.radians(angle)) * df['lat']) + \
+                                   (np.sin(np.radians(angle)) * df['lng'])
+
+            df[f'rot_{angle}_y'] = (np.cos(np.radians(angle)) * df['lat']) - \
+                                   (np.sin(np.radians(angle)) * df['lng'])
+
+        return df
+
+    f_location = rot(df_location)
+
+    return pd.merge(df_train, f_location, 'left', 'cfips')
 
 
 def _fix_df_train(df_train):
@@ -108,6 +161,9 @@ def _fix_df_train(df_train):
     # Add month
     df["month"] = df["first_day_of_month"].dt.month
 
+    # Add location data
+    df = _add_location(df)
+
     return df
 
 
@@ -120,7 +176,7 @@ def _loop_new_cols(
 ) -> pd.DataFrame:
     res = []
     for idx, row in df_mapped_feature.iterrows():
-        r = f(df, idx, target_col, int(row["params"]), groupby_col)
+        r = f(df, idx, target_col, round(row["params"]), groupby_col)
         res.append(r)
 
     return pd.concat(res, axis=1)
