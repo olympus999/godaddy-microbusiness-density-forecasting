@@ -1,6 +1,6 @@
 # Readme
 
-Testing bayesian bayesian global optimization with gaussian processes for selecting features, feature engineering and model parameter optimization - all at once.
+Testing bayesian global optimization with gaussian processes for selecting features, feature engineering and model parameter optimization - all at once.
 
 starter.ipynb - containing the code to run the optimization.
 
